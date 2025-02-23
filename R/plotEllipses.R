@@ -1,38 +1,42 @@
-library(plyr)
-library(ggplot2)
+# Draw ellipses for sample covariance matrices before and after transport
+df.cov <- data.frame(Observation = rep(1:5, 3),
+                     Sample = rep(c('Source', 'Target (Riemannian)', 
+                                    'Target (Euclidean)'), each = 5),
+                     Condition = rep(c('Pre', 'Post', 'Post'), each = 5))
+df.cov$Cov <- c(sample.cov, transported.cov.rieman, transported.cov.euclid)
+df.cov$Ref <- rep(list(start, end, end), each = 5)
 
-m <- transported.cov.rieman[[1]]
+df.cov <- ddply(df.cov, c('Observation', 'Condition'), mutate,
+                'Dist' = spd.dist(Cov[[1]], Ref[[1]], method = 'riemannian'),
+                'Det'  = det(Cov[[1]]))
 
-drawEllipse <- function(m) {
-    l <- eigen(m)$values
-    if (m[1,2] == 0 & m[1,1] >= m[2,2]) {
-        theta <- 0
-    } else if (m[1,2] == 0 & m[1,1] < m[2,2]) {
-        theta <- pi/2
-    } else {
-        theta <- atan2(l[1] - m[1,1], m[1,2])
-    }
-    t <- seq(0, 2*pi, length.out = 40)
-    
-    x <- sqrt(l[1]) * cos(theta)*cos(t) - sqrt(l[2]) * sin(theta)*sin(t)
-    y <- sqrt(l[1]) * sin(theta)*sin(t) + sqrt(l[2]) * cos(theta)*cos(t)
-    data.frame(x = x, y = y)
-}
-
-df.sample <- data.frame(Observation = rep(1:5, 3),
-                        Condition = rep(c('Source', 'Target (Riemannian)', 
-                                          'Target (Euclidean)'), each = 5))
-df.sample$Cov <- c(sample.cov, transported.cov.rieman, transported.cov.euclid)
-df.sample$Ref <- rep(list(start, end, end), each = 5)
-df.sample <- ddply(df.sample, c('Observation', 'Condition'), mutate,
-                   'Dist' = spd.dist(Cov[[1]], Ref[[1]], method = 'riemannian'),
-                   'Det' = det(Cov[[1]]))
-
-df.ellipse <- ddply(df.sample, c('Observation', 'Condition'), summarize,
+df.ellipse <- ddply(df.cov, c('Observation', 'Sample', 'Condition'), summarize,
                     'x' = drawEllipse(Cov[[1]])$x, 'y' = drawEllipse(Cov[[1]])$y)
+df.ellipse$Condition <- factor(df.ellipse$Condition, c('Pre', 'Post'))
 
-ggplot(df.ellipse, aes(x = x, y = y, group = Observation,
-                       color = as.factor(Observation))) +
-    facet_grid(Observation ~ Condition) + theme_classic() +
+# Draw ellipses for start and end points
+l.startend <- list(drawEllipse(start), drawEllipse(end))
+l.startend[[1]] <- cbind(l.startend[[1]], 
+                         data.frame(Observation = rep(NA, nrow(l.startend[[1]])),
+                                    Sample = NA, Condition = 'Pre'))
+l.startend[[2]] <- cbind(l.startend[[2]], 
+                         data.frame(Observation = rep(NA, nrow(l.startend[[2]])),
+                                    Sample = NA, Condition = 'Post'))
+df.startend <- do.call(rbind, l.startend)
+df.startend <- do.call(rbind, lapply(1:5, function(i) {
+    d <- df.startend
+    d$Observation <- i
+    return(d)
+}))
+df.startend$Condition <- factor(df.startend$Condition, c('Pre', 'Post'))
+
+
+pl.ellipse <- ggplot(df.ellipse, aes(x = x, y = y, group = interaction(Observation, Sample),
+                       color = Sample)) +
+    facet_grid(Observation ~ Condition, scales = 'free') + theme_classic() +
+    geom_path(data = df.startend, aes(x = x, y = y), 
+              color = grey(.5), linetype = 'dashed') +
     geom_path() +
-    theme(legend.position = 'none')
+    scale_color_manual(values = c('black', 'darkblue', 'darkorange')) +
+    theme(legend.position = 'bottom',
+          legend.title = element_blank())
